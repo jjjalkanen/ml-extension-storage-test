@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "name": "test-ml-performance",
+  "version": "0.1",
+  "description": "Simple test to understand ML performance",
+  "optional_permissions": ["trialML"],
+  "permissions": ["menus", "scripting", "<all_urls>"],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "Simple ml performance test"
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "options_ui": {
+    "page": "settings.html"
+  }
+}

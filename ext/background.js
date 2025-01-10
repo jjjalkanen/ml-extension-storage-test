@@ -4,12 +4,11 @@
 
 const DEFAULT_MODELS = [
   // "image-classification",
-  // Error: Error: Could not locate file: "https://model-hub.mozilla.org/Xenova/vit-base-patch16-224/default/preprocessor_config.json".
-  // is replaced with https://huggingface.co/Xenova/vit-base-patch16-224-in21k
   // "image-segmentation",
   // "zero-shot-image-classification",
-  // https://github.com/huggingface/transformers.js/issues/955
-  /*
+  /**
+   * The following issue is encountered when running of some of the models:
+    https://github.com/huggingface/transformers.js/issues/955
   �[0;93m2025-01-02 12:25:25.385938 [W:onnxruntime:, constant_folding.cc:268 ApplyImpl] Could not find a CPU kernel and hence can't constant fold Exp node '/Exp'�[m
     Hc :100
     <anonymous> line 26 > WebAssembly.instantiate:17014471
@@ -34,7 +33,7 @@ const DEFAULT_MODELS = [
     createInferenceSessionHandler chrome://global/content/ml/ort.webgpu-dev.mjs:16321
     create chrome://global/content/ml/ort.webgpu-dev.mjs:1179
   */
-  // "object-detection", // Ok but doesn't detect anythng
+  // "object-detection",
   // "zero-shot-object-detection",
   // "image-to-image",
   // "depth-estimation",
@@ -50,10 +49,16 @@ const DEFAULT_MODELS = [
   // "token-classification",
   // "document-question-answering",
   // "question-answering",
-  // // "fill-mask",
+  // "fill-mask",
 ];
 
 const taskToModel = {
+  /**
+   * Some of the models are base models like vit-base-patch16-224
+   * and the output does not contain "logits" for classification,
+   * we need to use a model which is fine-tuned for some set of classes,
+   * such as cifar10.
+   */
   // "image-classification": {
   //   modelHub: "huggingface",
   //   modelRevision: "main",
@@ -68,49 +73,18 @@ const taskToModel = {
   //   dtype: "fp32",
   //   taskName: "image-segmentation",
   // },
-  // "image-classification": {
-  //   taskName: "image-classification",
-  //   modelRevision: "main",
-  // },
-  // "image-segmentation": {
-  //   taskName: "image-segmentation",
-  //   modelRevision: "main",
-  // },
-  // "zero-shot-image-classification": {
-  //     taskName: "zero-shot-image-classification",
-  //     modelRevision: "main",
-  // },
-  // "object-detection": {
-  //   taskName: "object-detection",
-  //   modelRevision: "main",
-  // },
-  // "zero-shot-object-detection": {
-  //   taskName: "zero-shot-object-detection",
-  //   modelRevision: "main",
-  // },
-  // "image-to-image": {
-  //   taskName: "image-to-image",
-  //   modelRevision: "main",
-  // },
-  // "depth-estimation": {
-  //   taskName: "depth-estimation",
-  //   modelRevision: "main",
-  // },
-  // "feature-extraction": {
-  //   taskName: "feature-extraction",
-  //   modelRevision: "main",
-  // },
-  // "image-feature-extraction": {
-  //   taskName: "image-feature-extraction",
-  //   modelRevision: "main",
-  // },
-  "image-to-text": {
-    taskName: "image-to-text",
-    modelRevision: "main",
-  },  
 };
 
-var firstRun = true;
+function getOpts(aName) {
+  // If modelRevision "main" is not specified, there's a problem with default in
+  // Error: Could not locate file:
+  // "https://model-hub.mozilla.org/Xenova/vit-base-patch16-224/default/preprocessor_config.json".
+  if (!(aName in taskToModel)) {
+    return { taskName: aName, modelRevision: "main" };
+  }
+
+  return taskToModel[aName];
+}
 
 function createImageSample() {
   // Desired dimensions
@@ -153,97 +127,116 @@ function createImageSample() {
   return result;
 }
 
-async function useModels() {
-  const results = [];
-
+let firstRun = true;
+let results = [];
+let what = "success";
+async function useModels(aPort) {
   const listener = progressData => {
-    results.push(progressData);
+    aPort.postMessage({
+      type: "progressUpdate",
+      progress: progressData,
+    });
   };
 
   browser.trial.ml.onProgress.addListener(listener);
 
   try {
     if (firstRun) {
-      for (const taskName of DEFAULT_MODELS) {
-        results.push("Loading " + taskName);
-        const opts = taskToModel[taskName];
-        await browser.trial.ml.createEngine(opts);
-      }
-      results.push("Model loading done!");
+      await Promise.allSettled(
+        Array.from(DEFAULT_MODELS, taskName => {
+          return new Promise((resolve, reject) => {
+            aPort.postMessage({
+              type: "progressUpdate",
+              progress: "Loading " + taskName,
+            });
+            try {
+              const opts = getOpts(taskName);
+              const start = performance.now();
+              browser.trial.ml.createEngine(opts).then(() => {
+                results.push({
+                  name: taskName,
+                  took: performance.now() - start,
+                });
+                resolve();
+              }).catch(err => {
+                results.push({
+                  name: taskName,
+                  error: err.message
+                });
+                reject();
+              });
+            } catch (err) {
+              results.push({
+                name: taskName,
+                error: err.message
+              });
+              reject();
+            }
+          });
+        })
+      );
+      aPort.postMessage({
+        type: "progressUpdate",
+        progress: "Model loading done!",
+      });
       firstRun = false;
     }
 
-    // const jpegDataUrl = createImageSample();
+  /*
+    const jpegDataUrl = createImageSample();
 
-    // const WITH_IMAGE_INPUT = {
-      // "image-classification": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-      //   ],
-      // },
-      // "image-segmentation": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-      //   ],
-      // },
-      // "zero-shot-image-classification": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg",
-      //     ["animals", "nature"]
-      //   ],
-      // },
-      // "object-detection": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-      //   ],
-      // },
-      // "zero-shot-object-detection": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg",
-      //     ["tiger"]
-      //   ],
-      // },
-      // "image-to-image": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-      //   ],
-      // },
-      // "depth-estimation": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-      //   ],
-      // },
-      // "feature-extraction": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-      //   ],
-      // },
-      // "image-feature-extraction": {
-      //   args: [
-      //     "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-      //   ],
-      // },
-    //   "image-to-text": {
-    //     args: [
-    //       "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
-    //       // jpegDataUrl 
-    //     ],
-    //     options: {
-    //       max_new_tokens: 300,
-    //     }
-    //   },
-    // };
+    const WITH_IMAGE_INPUT = {
+      "zero-shot-image-classification": {
+        args: [
+          "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg",
+          ["animals", "nature"]
+        ],
+      },
+      "zero-shot-object-detection": {
+        args: [
+          "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg",
+          ["tiger"]
+        ],
+      },
+      "image-to-text": {
+        args: [
+          jpegDataUrl 
+        ],
+        options: {
+          max_new_tokens: 300,
+        }
+      },
+    };
 
-    // for (const modelName of Object.keys(WITH_IMAGE_INPUT)) {
-    //   results.push("Running " + modelName);
-    //   const args = WITH_IMAGE_INPUT[modelName];
-    //   const result = await browser.trial.ml.runEngine(args);
-    //   results.push({results: {name: modelName, data: JSON.stringify(result)}});
-    // }
+    function getArgs(aName) {
+      // Sometimes special arguments are needed
+      if (!(aName in WITH_IMAGE_INPUT)) {
+        return {
+          args: [
+            "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/tiger.jpg"
+          ]
+        };
+      }
+    
+      return WITH_IMAGE_INPUT[aName];
+    }
 
-    // results.push("Image model running done!");
+    for (const modelName of Object.keys(WITH_IMAGE_INPUT)) {
+      aPort.postMessage({
+        type: "progressUpdate",
+        progress: "Running " + modelName,
+      });
+      const args = getArgs(modelName);
+      const start = performance.now();
+      const result = await browser.trial.ml.runEngine(args);
+      results.push({name: modelName, took: performance.now() - start});
+    }
 
-    /*
+    aPort.postMessage({
+      type: "progressUpdate",
+      progress: "Image model running done!"
+    });
+
     const enhancedText = await (async () => {
       const engine = engines["text-generation"];
       const seedText = imgInputResults["image-to-text"];
@@ -303,25 +296,44 @@ async function useModels() {
     */
     
   } catch (err) {
-    results.push({error: err.message});
+    what = "error";
+    aPort.postMessage({
+      type: "progressUpdate",
+      progress: err.message,
+    });
+  } finally {
+    aPort.postMessage({
+      type: "progressComplete",
+      results: {
+        what,
+        data: JSON.stringify(results),
+      },
+    });
   }
-
-  return results;
 }
 
-browser.runtime.onMessage.addListener((data, _, sendResponse) => {
-  if (data.action !== "runAsyncTask") {
-    sendResponse({ status: "error", error: "Unknown action"});
-    return true;
+let isRunning = false;
+
+browser.runtime.onConnect.addListener((port) => {
+  if (port.name === "progressChannel") {
+    port.onMessage.addListener((msg) => {
+      if (msg.action !== "runAsyncTask") {
+        port.postMessage({
+          type: "progressComplete",
+          results: { what: "error", data: ["Unknown action"] },
+        });
+        return true;
+      } else {
+        if (isRunning) {
+          port.postMessage({
+            type: "progressUpdate",
+            progress: "Already in progress",
+          });
+          return;
+        }
+        useModels(port);
+        isRunning = true;
+      }
+    });
   }
-
-  useModels().then(results => {
-    sendResponse({ status: "success", data: results });
-  })
-  .catch(err => {
-      sendResponse({ status: "error", error: err.message});
-  });
-
-  // Return true to indicate an async sendResponse
-  return true;
 });

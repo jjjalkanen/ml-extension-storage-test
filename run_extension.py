@@ -76,7 +76,7 @@ def get_internal_uuids(driver):
     
     # Select all <li> items that match the extension pattern
     extension_cards = soup.select(
-        'li.card.debug-target-item.qa-debug-target-item[data-qa-target-type="extension"]'
+        'li.card.debug-target-item.qa-debug-target-item'
     )
 
     for card in extension_cards:
@@ -213,7 +213,7 @@ def check_preferences(driver):
 class TestFirefoxExtension(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-        print("Temp dir ", self.temp_dir)
+        print("Profile directory:", self.temp_dir)
 
         zip_path = Path.cwd() / "assets" / "profile.zip"
         destination_path = Path(self.temp_dir)
@@ -244,7 +244,8 @@ class TestFirefoxExtension(unittest.TestCase):
         self.options.add_argument("--profile")
         self.options.add_argument(self.temp_dir)
 
-        # self.options.add_argument("--headless")  # Eventually
+        if test_config.headless:
+            self.options.add_argument("--headless")
 
         self.driver = webdriver.Firefox(options=self.options,
             service=FirefoxService(GeckoDriverManager().install()))
@@ -282,30 +283,27 @@ class TestFirefoxExtension(unittest.TestCase):
         start_button = self.driver.find_element(By.ID, "startButton")
         start_button.click()
 
+        status_div = self.driver.find_element(By.ID, "status")
+
         # Wait for up to 10 seconds for the #status element to be either "success" or "error".
-        WebDriverWait(self.driver, 120).until(
-            lambda d: d.find_element(By.ID, "status").text in ["success", "error"]
+        WebDriverWait(self.driver, test_config.timeout).until(
+            lambda d: status_div.get_attribute("innerText") and status_div.get_attribute("innerText") in ["success", "error"]
         )
 
-        status_text = self.driver.find_element(By.ID, "status").text
+        if not test_config.headless:
+            time.sleep(10)
+
+        status_text = status_div.text
         results_html = self.driver.find_element(By.ID, "results").get_attribute("innerHTML")
 
         # Now check logic:
-        if status_text == "success":
-            # Optionally parse with BeautifulSoup, or just read with Selenium
-            soup = BeautifulSoup(results_html, "html.parser")
-            # We expect a <table><tr><td>1</td><td>2</td><td>3</td></tr></table>
-            table_cells = soup.find_all("td")
-            results = [cell.get_text() for cell in table_cells]
-            for result in results:
-                print(result)
-        elif status_text == "error":
-            soup = BeautifulSoup(results_html, "html.parser")
-            # We expect a <div> with "Simulated error occurred" text
-            divs = soup.find_all("div")
-            # Just check that there's a "Simulated error occurred" in one of them
-            errors_found = any("Simulated error occurred" in d.get_text() for d in divs)
-            self.assertTrue(errors_found, "Expected 'Simulated error occurred' in the results")
+        soup = BeautifulSoup(results_html, "html.parser")
+        # We expect a table
+        table_cells = soup.find_all("td")
+        results = [cell.get_text() for cell in table_cells]
+        for result in results:
+            print(result)
+        self.assertEqual(status_text, "success")
 
 
 if __name__ == '__main__':
@@ -316,8 +314,9 @@ if __name__ == '__main__':
 
     parser.add_argument('-h', '--help', action='store_true')
 
-    parser.add_argument('--binary_location', type=str, help='Specify /path/to/firefox.exe')
-    parser.add_argument('--headless', action='store_true', help='Run in headless mode')
+    parser.add_argument('--binary_location', type=str, default=None, help='Specify /path/to/firefox.exe')
+    parser.add_argument('--headless', action='store_true', default=False, help='Run in headless mode')
+    parser.add_argument('--timeout', type=int, default=300, help='Time until the test is stopped by force')
 
     args, remaining_args = parser.parse_known_args()
     if args.help:
@@ -328,5 +327,6 @@ if __name__ == '__main__':
     else:
         test_config.binary_location = args.binary_location
         test_config.headless = args.headless
+        test_config.timeout = args.timeout
 
     unittest.main(argv=[sys.argv[0]] + remaining_args)

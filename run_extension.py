@@ -1,7 +1,9 @@
+import argparse
 import hashlib
 import os
 import random
 import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -18,6 +20,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.firefox  import GeckoDriverManager
 
+# Custom parameters for this script
+import test_config
+
+unit_test_header = \
+"""
+
+Custom parameters may be combined with python unit test parameters:
+"""
 
 def zip_folder_flatten(folder_path):
     """
@@ -221,7 +231,13 @@ class TestFirefoxExtension(unittest.TestCase):
             safe_extract(zip_ref, destination_path)
 
         self.options = Options()
-        self.options.binary_location = "D:/mozilla-unified/obj-ff-dbg/dist/bin/firefox.exe"
+
+        # If binary location is not specified, then use Selenium defaults
+        if test_config.binary_location is not None:
+            firefox_exe = Path(test_config.binary_location)
+            if not firefox_exe.is_file():
+                raise Exception("File " + str(firefox_exe) + " does not exist")
+            self.options.binary_location = test_config.binary_location
         self.options.set_preference("browser.ml.enable", True)
         self.options.set_preference("extensions.ml.enabled", True)
 
@@ -291,5 +307,26 @@ class TestFirefoxExtension(unittest.TestCase):
             errors_found = any("Simulated error occurred" in d.get_text() for d in divs)
             self.assertTrue(errors_found, "Expected 'Simulated error occurred' in the results")
 
+
 if __name__ == '__main__':
-    unittest.main()
+    parser = argparse.ArgumentParser(
+        description='Test firefox ml extensions.',
+        # Prevent argparse from parsing unknown args to avoid conflicts with unittest
+        add_help=False)
+
+    parser.add_argument('-h', '--help', action='store_true')
+
+    parser.add_argument('--binary_location', type=str, help='Specify /path/to/firefox.exe')
+    parser.add_argument('--headless', action='store_true', help='Run in headless mode')
+
+    args, remaining_args = parser.parse_known_args()
+    if args.help:
+        print("Custom parameters:")
+        parser.print_help()
+        remaining_args.append("--help")
+        print(unit_test_header)
+    else:
+        test_config.binary_location = args.binary_location
+        test_config.headless = args.headless
+
+    unittest.main(argv=[sys.argv[0]] + remaining_args)

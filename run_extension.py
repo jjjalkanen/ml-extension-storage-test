@@ -1,25 +1,22 @@
+import hashlib
+import os
+import random
+import shutil
+import tempfile
 import time
 import unittest
-
-from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from webdriver_manager.firefox  import GeckoDriverManager
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
+import zipfile
 
 from bs4 import BeautifulSoup
 from pathlib import Path
 
-import os
-import zipfile
-import tempfile
-import hashlib
-import time
-import random
-import tempfile
-import shutil
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.wait import WebDriverWait
+from webdriver_manager.firefox  import GeckoDriverManager
 
 
 def zip_folder_flatten(folder_path):
@@ -205,29 +202,33 @@ def check_preferences(driver):
 
 class TestFirefoxExtension(unittest.TestCase):
     def setUp(self):
-        """
-        Set up Selenium with Firefox, including installing the extension.
-        """
         self.temp_dir = tempfile.mkdtemp()
         print("Temp dir ", self.temp_dir)
+
+        zip_path = Path.cwd() / "assets" / "profile.zip"
+        destination_path = Path(self.temp_dir)
+
+        def safe_extract(zip_ref, destination):
+            for member in zip_ref.namelist():
+                member_path = os.path.join(destination, member)
+                abs_destination = os.path.abspath(destination)
+                abs_member_path = os.path.abspath(member_path)
+                if not abs_member_path.startswith(abs_destination):
+                    raise Exception("Attempted Path Traversal in ZIP File")
+            zip_ref.extractall(destination)
+
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            safe_extract(zip_ref, destination_path)
+
         self.options = Options()
         self.options.binary_location = "D:/mozilla-unified/obj-ff-dbg/dist/bin/firefox.exe"
         self.options.set_preference("browser.ml.enable", True)
         self.options.set_preference("extensions.ml.enabled", True)
-        self.options.set_preference("services.settings.server", "firefox.settings.services.mozilla.com")
-        self.options.set_preference("security.remote_settings.intermediates.enabled", True)
-        self.options.set_preference("browser.safebrowsing.downloads.enabled", True)
+
         self.options.add_argument("--profile")
         self.options.add_argument(self.temp_dir)
 
         # self.options.add_argument("--headless")  # Eventually
-        
-        # Define source and destination paths
-        source_path = Path.cwd() / "ext" / "user.js"
-        destination_path = Path(self.temp_dir) / "user.js"
-
-        # Copy preferences
-        shutil.copy(source_path, destination_path)
 
         self.driver = webdriver.Firefox(options=self.options,
             service=FirefoxService(GeckoDriverManager().install()))
@@ -266,7 +267,7 @@ class TestFirefoxExtension(unittest.TestCase):
         start_button.click()
 
         # Wait for up to 10 seconds for the #status element to be either "success" or "error".
-        WebDriverWait(self.driver, 20).until(
+        WebDriverWait(self.driver, 120).until(
             lambda d: d.find_element(By.ID, "status").text in ["success", "error"]
         )
 

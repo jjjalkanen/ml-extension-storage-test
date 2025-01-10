@@ -319,7 +319,7 @@ browser.runtime.onMessage.addListener((data, _, sendResponse) => {
     sendResponse({ status: "success", data: results });
   })
   .catch(err => {
-      sendResponse({ status: "error", error: err });
+      sendResponse({ status: "error", error: err.message});
   });
 
   // Return true to indicate an async sendResponse

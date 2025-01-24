@@ -22,8 +22,6 @@ from webdriver_manager.firefox import GeckoDriverManager
 
 # Custom parameters for this script
 import test_config
-
-
 """
     The following issue is encountered when running of some of the models:
     https://github.com/huggingface/transformers.js/issues/955
@@ -432,7 +430,8 @@ class TestFirefoxExtension(unittest.TestCase):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Test firefox ml extensions.',
+        description="Test firefox ml extensions. Binary location is mandatory "
+        + "to avoid issues with Selenium's default selection.",
         # Prevent argparse from parsing unknown args to avoid conflicts with unittest
         add_help=False)
 
@@ -441,6 +440,7 @@ if __name__ == '__main__':
     parser.add_argument('--binary_location',
                         type=str,
                         default=None,
+                        required=True,
                         help='Specify /path/to/firefox.exe')
     parser.add_argument('--headless',
                         action='store_true',

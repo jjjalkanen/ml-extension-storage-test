@@ -4,14 +4,28 @@
   "version": "0.1",
   "description": "Simple test to understand ML performance",
   "optional_permissions": ["trialML"],
-  "permissions": ["menus", "scripting", "<all_urls>"],
+  "permissions": [
+    "activeTab",
+    "menus",
+    "scripting",
+    "storage",
+    "tabs",
+    "<all_urls>"
+  ],
   "browser_action": {
     "default_popup": "popup.html",
     "default_title": "Simple ml performance test"
   },
   "background": {
-    "scripts": ["background.js"]
+    "scripts": ["background.js"],
+    "persistent": false
   },
+  "content_scripts": [
+    {
+      "matches": ["https://www.example.org/*"],
+      "js": ["content.js"]
+    }
+  ],
   "options_ui": {
     "page": "settings.html"
   }

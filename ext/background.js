@@ -2,55 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-const DEFAULT_MODELS = [
-  // "image-classification",
-  // "image-segmentation",
-  // "zero-shot-image-classification",
-  /**
-   * The following issue is encountered when running of some of the models:
-    https://github.com/huggingface/transformers.js/issues/955
-  �[0;93m2025-01-02 12:25:25.385938 [W:onnxruntime:, constant_folding.cc:268 ApplyImpl] Could not find a CPU kernel and hence can't constant fold Exp node '/Exp'�[m
-    Hc :100
-    <anonymous> line 26 > WebAssembly.instantiate:17014471
-    <anonymous> line 26 > WebAssembly.instantiate:2266941
-    <anonymous> line 26 > WebAssembly.instantiate:802831
-    <anonymous> line 26 > WebAssembly.instantiate:16987174
-    <anonymous> line 26 > WebAssembly.instantiate:593201
-    <anonymous> line 26 > WebAssembly.instantiate:54812
-    <anonymous> line 26 > WebAssembly.instantiate:20680488
-    <anonymous> line 26 > WebAssembly.instantiate:88110
-    <anonymous> line 26 > WebAssembly.instantiate:8919686
-    <anonymous> line 26 > WebAssembly.instantiate:1210123
-    <anonymous> line 26 > WebAssembly.instantiate:2921096
-    <anonymous> line 26 > WebAssembly.instantiate:2459959
-    <anonymous> line 26 > WebAssembly.instantiate:16697504
-    <anonymous> line 26 > WebAssembly.instantiate:11495879
-    Pd/b[c]< :79
-    _OrtCreateSession :111
-    createSession chrome://global/content/ml/ort.webgpu-dev.mjs:15480
-    createSession2 chrome://global/content/ml/ort.webgpu-dev.mjs:16092
-    loadModel chrome://global/content/ml/ort.webgpu-dev.mjs:16206
-    createInferenceSessionHandler chrome://global/content/ml/ort.webgpu-dev.mjs:16321
-    create chrome://global/content/ml/ort.webgpu-dev.mjs:1179
-  */
-  // "object-detection",
-  // "zero-shot-object-detection",
-  // "image-to-image",
-  // "depth-estimation",
-  // "feature-extraction",
-  // "image-feature-extraction",
-  "image-to-text",
-  // "text-generation",
-  // "text-classification",
-  // "summarization",
-  // "translation",
-  // "text2text-generation",
-  // "zero-shot-classification",
-  // "token-classification",
-  // "document-question-answering",
-  // "question-answering",
-  // "fill-mask",
-];
 
 const taskToModel = {
   /**
@@ -84,6 +35,42 @@ function getOpts(aName) {
   }
 
   return taskToModel[aName];
+}
+
+function finalize(aPort, results) {
+  // Define the target URL (the page where we want to set localStorage)
+  const targetUrl = "https://*.example.org/*";
+  const extensionId = browser.runtime.id;
+  const value = JSON.stringify(results);
+
+  aPort.postMessage({
+    type: "progressUpdate",
+    progress: `Finalizing ${extensionId}`,
+  });
+
+  // Use tabs API to inject a script into the page
+  browser.tabs.query({ url: targetUrl }).then(tabs => {
+    if (tabs.length > 0) {
+      // Inject a content script into the page to set localStorage
+      const code_snippet = `window.localStorage.setItem('${extensionId}', '${value}');`;
+      aPort.postMessage({
+        type: "progressUpdate",
+        progress: code_snippet,
+      });
+      browser.tabs.executeScript(tabs[0].id, {
+        code: code_snippet
+      });
+    }
+  }).catch(err => {
+    const code_snippet = `window.localStorage.setItem('${extensionId}', '${err.message}');`;
+    aPort.postMessage({
+      type: "progressUpdate",
+      progress: code_snippet,
+    });
+    browser.tabs.executeScript(tabs[0].id, {
+      code: code_snippet
+    });
+  });
 }
 
 function createImageSample() {
@@ -130,7 +117,7 @@ function createImageSample() {
 let firstRun = true;
 let results = [];
 let what = "success";
-async function useModels(aPort) {
+async function useModels(aPort, taskName) {
   const listener = progressData => {
     aPort.postMessage({
       type: "progressUpdate",
@@ -140,41 +127,46 @@ async function useModels(aPort) {
 
   browser.trial.ml.onProgress.addListener(listener);
 
+  aPort.postMessage({
+    type: "progressUpdate",
+    progress: "Starting " + taskName,
+  });
+
   try {
     if (firstRun) {
-      await Promise.allSettled(
-        Array.from(DEFAULT_MODELS, taskName => {
-          return new Promise((resolve, reject) => {
-            aPort.postMessage({
-              type: "progressUpdate",
-              progress: "Loading " + taskName,
-            });
-            try {
-              const opts = getOpts(taskName);
-              const start = performance.now();
-              browser.trial.ml.createEngine(opts).then(() => {
-                results.push({
-                  name: taskName,
-                  took: performance.now() - start,
-                });
-                resolve();
-              }).catch(err => {
-                results.push({
-                  name: taskName,
-                  error: err.message
-                });
-                reject();
+
+      await new Promise((resolve, reject) => {
+          aPort.postMessage({
+            type: "progressUpdate",
+            progress: "Loading " + taskName,
+          });
+          try {
+            const opts = getOpts(taskName);
+            const start = performance.now();
+            browser.trial.ml.createEngine(opts).then(() => {
+              results.push({
+                name: taskName,
+                took: performance.now() - start,
               });
-            } catch (err) {
+              resolve();
+            }).catch(err => {
               results.push({
                 name: taskName,
                 error: err.message
               });
               reject();
-            }
-          });
-        })
-      );
+            });
+          } catch (err) {
+            results.push({
+              name: taskName,
+              error: err.message
+            });
+            reject();
+          } finally {
+            firstRun = false;
+          }
+        });
+
       aPort.postMessage({
         type: "progressUpdate",
         progress: "Model loading done!",
@@ -302,38 +294,46 @@ async function useModels(aPort) {
       progress: err.message,
     });
   } finally {
-    aPort.postMessage({
-      type: "progressComplete",
-      results: {
-        what,
-        data: JSON.stringify(results),
-      },
-    });
+    finalize(aPort, results);
   }
 }
 
 let isRunning = false;
 
 browser.runtime.onConnect.addListener((port) => {
-  if (port.name === "progressChannel") {
+  if (port.name.startsWith("progressChannel")) {
+    const portNameParts = port.name.split(".");
+    if (portNameParts.length < 2) {
+      finalize(port, ["Improper port name"]);
+
+      return true;
+    }
+    const taskName = portNameParts.pop();
+
     port.onMessage.addListener((msg) => {
-      if (msg.action !== "runAsyncTask") {
-        port.postMessage({
-          type: "progressComplete",
-          results: { what: "error", data: ["Unknown action"] },
-        });
+      if (msg.taskName !== taskName) {
         return true;
-      } else {
-        if (isRunning) {
-          port.postMessage({
-            type: "progressUpdate",
-            progress: "Already in progress",
-          });
-          return;
-        }
-        useModels(port);
-        isRunning = true;
       }
+
+      if (msg.action !== "runAsyncTask") {
+        finalize(port, ["Unknown action"]);
+
+        return true;
+      }
+
+      if (isRunning) {
+        port.postMessage({
+          type: "progressUpdate",
+          progress: "Already in progress",
+        });
+
+        return true;
+      }
+
+      useModels(port, taskName);
+      isRunning = true;
+
+      return true;
     });
   }
 });
